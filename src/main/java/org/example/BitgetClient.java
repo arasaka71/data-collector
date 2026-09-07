@@ -36,7 +36,8 @@ public class BitgetClient {
                     .queryParam("limit", 100)
                     .build())
                 .retrieve()
-                .body(new ParameterizedTypeReference<BitgetResponse<List<List<String>>>>() {});
+                .body(new ParameterizedTypeReference<>() {
+                });
 
         return mapCandles(response);
     }
@@ -57,15 +58,13 @@ public class BitgetClient {
     private Candle mapCandle(List<String> data) {
         return new Candle(
                 Instant.ofEpochMilli(Long.parseLong(data.get(0))),
-                new BigDecimal(data.get(1)),
-                new BigDecimal(data.get(2)),
-                new BigDecimal(data.get(3)),
-                new BigDecimal(data.get(4)),
-                new BigDecimal(data.get(5)),
-                new BigDecimal(data.get(6))
+                new BigDecimal(data.get(1)),    // timestamp
+                new BigDecimal(data.get(2)),    // open
+                new BigDecimal(data.get(3)),    // high
+                new BigDecimal(data.get(4)),    // low
+                new BigDecimal(data.get(5)),    // close
+                new BigDecimal(data.get(6))     // turnover (gehandelter Gegenwert)
         );
     }
-
-
 
 }
