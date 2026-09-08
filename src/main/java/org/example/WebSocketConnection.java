@@ -11,6 +11,10 @@ public final class WebSocketConnection implements WebSocket.Listener {
     private final HttpClient httpClient;
     private final Consumer<String> messageHandler;
 
+    private final StringBuilder textBuffer = new StringBuilder();
+
+
+
     private volatile WebSocket webSocket;
 
     public WebSocketConnection(Consumer<String> messageHandler) {
@@ -35,14 +39,21 @@ public final class WebSocketConnection implements WebSocket.Listener {
 
     @Override
     public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
-        messageHandler.accept(data.toString());
+        try {
+            textBuffer.append(data);
 
-        webSocket.request(1);
+            if (last) {
+                String msg = textBuffer.toString();
+                textBuffer.setLength(0);
 
-        return null;
+                messageHandler.accept(data.toString());
+
+            }
+            return null;
+        } finally {
+            webSocket.request(1);
+        }
     }
-
-
 
 
 
