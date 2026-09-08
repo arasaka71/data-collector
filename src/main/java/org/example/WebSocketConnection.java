@@ -3,6 +3,8 @@ package org.example;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
+import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.function.Consumer;
 
@@ -13,7 +15,8 @@ public final class WebSocketConnection implements WebSocket.Listener {
 
     private final StringBuilder textBuffer = new StringBuilder();
 
-
+    private final Object sendLock = new Object();
+    private CompletableFuture<Void> sendTail = CompletableFuture.completedFuture(null);
 
     private volatile WebSocket webSocket;
 
@@ -55,6 +58,56 @@ public final class WebSocketConnection implements WebSocket.Listener {
         }
     }
 
+    public CompletableFuture<Void> sendText(String message) {
+        Objects.requireNonNull(message);
+
+        WebSocket socket = requireConnectedWebSocket();
+
+        synchronized (sendLock) {
+            CompletableFuture<Void> sendFuture = sendTail
+                    .handle((unused, previousError) -> null)
+                    .thenCompose(unused ->
+                            socket.sendText(message, true)
+                    )
+                    .thenApply(unused -> null);
+
+            sendTail = sendFuture;
+
+            return sendFuture;
+        }
+    }
+
+
+    public CompletableFuture<Void> disconnect() {
+        WebSocket socket = this.webSocket;
+
+        if (socket == null || socket.isOutputClosed()) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        synchronized (sendLock) {
+            CompletableFuture<Void> closeFuture = sendTail
+                    .handle((unused, previousError) -> null)
+                    .thenCompose(unused -> socket.sendClose(WebSocket.NORMAL_CLOSURE, "")
+                    )
+                    .thenApply(unused -> null);
+
+            sendTail = closeFuture;
+            return closeFuture;
+        }
+    }
+
+    private WebSocket requireConnectedWebSocket() {
+        WebSocket socket = this.webSocket;
+
+        if (socket == null
+            || socket.isInputClosed()
+            || socket.isOutputClosed()) {
+            throw new IllegalStateException("Cannot connect to websocket");
+        }
+
+        return socket;
+    }
 
 
 
