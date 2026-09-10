@@ -51,35 +51,6 @@ public final class WebSocketConnection implements WebSocket.Listener {
                 .whenComplete((unused, error) -> connecting.set(false));
     }
 
-
-
-    @Override
-    public void onOpen(WebSocket webSocket) {
-        this.webSocket = webSocket;
-
-        synchronized (sendLock) {
-            sendTail = CompletableFuture.completedFuture(null);
-        }
-
-        webSocket.request(1);
-    }
-
-    @Override
-    public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
-        try {
-            textBuffer.append(data);
-
-            if (last) {
-                String msg = textBuffer.toString();
-                textBuffer.setLength(0);
-                messageHandler.accept(data.toString());
-            }
-            return null;
-        } finally {
-            webSocket.request(1);
-        }
-    }
-
     public CompletableFuture<Void> sendText(String message) {
         Objects.requireNonNull(message);
         WebSocket socket = requireConnectedWebSocket();
@@ -120,8 +91,6 @@ public final class WebSocketConnection implements WebSocket.Listener {
         }
     }
 
-
-
     public boolean isConnected() {
         WebSocket socket = this.webSocket;
 
@@ -129,6 +98,33 @@ public final class WebSocketConnection implements WebSocket.Listener {
                 && !socket.isInputClosed()
                 && !socket.isOutputClosed();
 
+    }
+
+    @Override
+    public void onOpen(WebSocket webSocket) {
+        this.webSocket = webSocket;
+
+        synchronized (sendLock) {
+            sendTail = CompletableFuture.completedFuture(null);
+        }
+
+        webSocket.request(1);
+    }
+
+    @Override
+    public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+        try {
+            textBuffer.append(data);
+
+            if (last) {
+                String msg = textBuffer.toString();
+                textBuffer.setLength(0);
+                messageHandler.accept(data.toString());
+            }
+            return null;
+        } finally {
+            webSocket.request(1);
+        }
     }
 
     // hier eigendlich schdeuler für reconnect
