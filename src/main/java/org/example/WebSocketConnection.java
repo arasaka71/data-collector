@@ -119,7 +119,7 @@ public final class WebSocketConnection implements WebSocket.Listener {
             if (last) {
                 String msg = textBuffer.toString();
                 textBuffer.setLength(0);
-                messageHandler.accept(data.toString());
+                messageHandler.accept(msg);
             }
             return null;
         } finally {
