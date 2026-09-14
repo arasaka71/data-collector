@@ -28,9 +28,9 @@ public final class WebSocketConnection implements WebSocket.Listener {
 
     public WebSocketConnection(Consumer<String> messageHandler,  Consumer<Throwable> errorHandler,  BiConsumer<Integer, String> closeHandler) {
         this.httpClient = HttpClient.newHttpClient();
-        this.messageHandler = messageHandler; // Objects.requireNonNull()
-        this.errorHandler = errorHandler;
-        this.closeHandler = closeHandler;
+        this.messageHandler = Objects.requireNonNull(messageHandler);
+        this.errorHandler = Objects.requireNonNull(errorHandler);
+        this.closeHandler = Objects.requireNonNull(closeHandler);
     }
 
 
