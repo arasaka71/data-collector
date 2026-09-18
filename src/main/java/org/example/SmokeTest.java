@@ -1,44 +1,34 @@
 package org.example;
 
+import tools.jackson.databind.ObjectReader;
+import tools.jackson.databind.ObjectWriter;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.concurrent.CompletableFuture;
 
 public final class SmokeTest {
      static void main(String[] args) throws InterruptedException {
+        String btcAsset = "BTCUSDT";
+
         //var firstTradeReceived = new CompletableFuture<Void>();
 
-        var protocal = new BitgetTradeProtocol(JsonMapper.builder().build());
+        //ObjectReader reader = jsonMapper.reader();
+        //ObjectWriter writer = jsonMapper.writer();
+        // JsonMapper.builder().findAndAddModules()
 
-         //                    if(protocal.isPong(message)) {
-         //                        return;
-         //                    }
-         //
-         //                    var json = protocal.parseJson(message);
-         //
-         //                    if (json.has("data")){
-         //                        firstTradeReceived.complete(null);
-         //                    }
-         var connection = new WebSocketConnection(
-                 IO::println,
+        var jsonMapper = JsonMapper.builder().build();
 
-                error -> {
-                    IO.println("ERROR: " + error.getMessage());
-                },
+        var decoder = new MessageDecoder(jsonMapper);
+        var protocol = new BitgetTradeProtocol(jsonMapper);
+        var webSocketConnection = new WebSocketConnection();
 
-                (statusCode, reason) -> {
-                    IO.println("STATUS: " + statusCode);
-                }
-        );
-
-
-        var receiver = new BitgetTradeReceiver(connection, protocal);
+        var receiver = new BitgetTradeReceiver(webSocketConnection, protocol, decoder);
 
         try{
             receiver.connect().toCompletableFuture().join();
             IO.println("CONNECTED");
 
-            receiver.subscribe("BTCUSDT").join();
+            receiver.subscribe(btcAsset).join();
 
             IO.println("SUBCRIBTION SENT");
 

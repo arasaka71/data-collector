@@ -17,13 +17,12 @@ public final class BitgetTradeProtocol {
 
     private static final String INST_TYPE = "usdt-futures";
     private static final String TOPIC = "publicTrade";
+
     private static final String SUBSCRIBE = "subscribe";
     private static final String UNSUBSCRIBE = "unsubscribe";
 
-    private static final String ERROR = "error";
+    private static final String HEARTBEAT_PING = "ping";
 
-    private static final String HEARTBEAT_MSG = "ping";
-    private static final String HEARTBEAT_RESPONSE = "pong";
 
     private static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(30);
 
@@ -35,7 +34,7 @@ public final class BitgetTradeProtocol {
 
     public URI endpoint() { return WS_ENDPOINT; }
     public Duration heartbeatInterval() { return HEARTBEAT_INTERVAL; }
-    public String heartbeatMessage() { return HEARTBEAT_MSG; }
+    public String heartbeatMessage() { return HEARTBEAT_PING; }
 
     public String subscriptionMessage(String symbol) {
         return buildChannelMessage(SUBSCRIBE, normalizeSymbol(symbol));
@@ -44,23 +43,6 @@ public final class BitgetTradeProtocol {
     public String unsubscriptionMessage(String symbol) {
         return buildChannelMessage(UNSUBSCRIBE, normalizeSymbol(symbol));
     }
-
-    public boolean isPong(String msg) {
-        return HEARTBEAT_RESPONSE.equals(msg);
-    }
-
-    public boolean isError(JsonNode node) {
-        return ERROR.equals(node.path("event").asString(""));
-    }
-
-    public JsonNode parseJson(String msg) {
-        try {
-            return  jsonMapper.readTree(msg);
-        }catch (JacksonException e){
-            throw new IllegalArgumentException("Failed to parse Bitget WebSocket message", e);
-        }
-    }
-
 
     private String buildChannelMessage(String operation, String symbol) {
 
@@ -75,9 +57,10 @@ public final class BitgetTradeProtocol {
 
     }
 
-    private String normalizeSymbol(String symbol) {
-        Objects.requireNonNull(symbol, "symbol must not be null");
-        if (symbol.isBlank()) { throw new IllegalArgumentException("symbol must not be blank"); }
+    public String normalizeSymbol(String symbol) {
+        if (symbol == null || symbol.isBlank()) {
+            throw new IllegalArgumentException("symbol must not be blank");
+        }
 
         return symbol.trim().toUpperCase(Locale.ROOT);
     }
