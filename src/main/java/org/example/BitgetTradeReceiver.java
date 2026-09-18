@@ -131,7 +131,7 @@ public class BitgetTradeReceiver {
         int attempt = reconnectAttempt.incrementAndGet();
         long delaySeconds = Math.min(30, 1L << Math.min(attempt - 1, 5));
 
-        LOGGER.warn("Scheduling reconnect attempt {} in {} seconds}", attempt, delaySeconds);
+        LOGGER.warn("Scheduling reconnect attempt {} in {} seconds", attempt, delaySeconds);
 
         reconnectTask = scheduler.schedule(() ->
                 {
@@ -210,7 +210,7 @@ public class BitgetTradeReceiver {
         stopHeartbeat();
 
         if (shuttingDown.get()) {
-            LOGGER.warn("WebSocket connection closed: statusCode={}, reason={}", status, reason);
+            LOGGER.info("WebSocket connection closed: statusCode={}, reason={}", status, reason);
             return;
         }
 
@@ -256,15 +256,37 @@ public class BitgetTradeReceiver {
     }
 
     private void handleSubscriptionAcknowledgement(JsonNode message){
-        // Subscription wurde von Bitget bestätigt.
+        JsonNode argument = message.path("arg");
+
+        LOGGER.info(
+                "Subscription acknowledged: instType={}, topic={}, symbol={}, connId={}",
+                argument.path("instType").asString(""),
+                argument.path("topic").asString(""),
+                argument.path("symbol").asString(""),
+                message.path("connId").asString("")
+        );
     }
 
     private void handleUnsubscriptionAcknowledgement(JsonNode message){
-        // Unsubscription wurde von Bitget bestätigt.
+        JsonNode argument = message.path("arg");
+
+        LOGGER.info(
+                "Unsubscription acknowledged: instType={}, topic={}, symbol={}, connId={}",
+                argument.path("instType").asString(""),
+                argument.path("topic").asString(""),
+                argument.path("symbol").asString(""),
+                message.path("connId").asString("")
+        );
     }
 
     private void handleErrorMessage(JsonNode message){
-        // Bitget hat eine Fehlermeldung gesendet.
+        LOGGER.error(
+                "Bitget protocol error: code={}, msg={}, operation={}, argument={}",
+                message.path("code").asString(""),
+                message.path("msg").asString(""),
+                message.path("op").asString(""),
+                message.path("arg")
+        );
     }
 
     private void handleTradeSnapshot(JsonNode message){
@@ -276,10 +298,10 @@ public class BitgetTradeReceiver {
     }
 
     private void handleUnknownMessage(JsonNode message){
-        // Unbekannte Nachricht protokollieren.
+        LOGGER.warn("Unknown Bitget message ignored: {}", message);
     }
 
     private void handleInvalidMessage(String rawMessage, Exception exception){
-        // Ungültige Nachricht protokollieren.
+        LOGGER.warn("Invalid WebSocket message ignored: rawMessage={}", rawMessage,  exception);
     }
 }
