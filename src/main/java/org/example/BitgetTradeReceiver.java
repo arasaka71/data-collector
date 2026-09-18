@@ -202,10 +202,9 @@ public class BitgetTradeReceiver {
         }
 
         stopHeartbeat();
-        // websocket.abort();
+        websocket.abort();
         scheduleReconnect();
     }
-
 
     private void handleConnectionClosed(Integer status, String reason) {
         stopHeartbeat();
