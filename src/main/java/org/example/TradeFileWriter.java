@@ -4,17 +4,36 @@ import tools.jackson.databind.JsonNode;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
 import java.io.UncheckedIOException;
-import java.net.http.WebSocket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class TradeFileWriter implements AutoCloseable {
 
+    private static final int QUEUE_CAPACITY = 50_000;
+    private static final int BATCH_SIZE = 500;
+    private static final int WRITER_BUFFER_SIZE = 64 * 1024;
+    private static final long FLUSH_INTERVAL_MILLLIS = 1_000;
+
+
+
+    private final BlockingQueue<JsonNode> queue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
+
+    private final AtomicBoolean acceptingMessages = new AtomicBoolean(true);
+    private final AtomicReference<RuntimeException> writerFailure = new AtomicReference<>();
+
     private final Path file;
     private final BufferedWriter writer;
+
+    private final ExecutorService writerExecutor;
 
     public TradeFileWriter(Path file) {
         this.file = file.toAbsolutePath();
@@ -26,36 +45,120 @@ public class TradeFileWriter implements AutoCloseable {
                 Files.createDirectories(parent);
             }
 
-            this.writer = Files.newBufferedWriter(
-                    this.file,
-                    StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE,
-                    StandardOpenOption.WRITE,
-                    StandardOpenOption.APPEND
+            this.writer = new BufferedWriter(
+                    new OutputStreamWriter(
+                            Files.newOutputStream(
+                                    this.file,
+                                    StandardOpenOption.CREATE,
+                                    StandardOpenOption.WRITE,
+                                    StandardOpenOption.APPEND
+                            ),
+                            StandardCharsets.UTF_8
+                    ),
+                    WRITER_BUFFER_SIZE
             );
         } catch (IOException exception) {
             throw new UncheckedIOException("Failed to open trade file" + this.file, exception);
         }
+
+
+        this.writerExecutor = Executors.newSingleThreadExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "bitget-trade-file-writer");
+            thread.setDaemon(false);
+            return thread;
+        });
+
+        this.writerExecutor.execute(this::runWriter);
     }
 
+    public void enqueue(JsonNode message) {
+        while (true) {
+            throwIfWriterFailed();
 
-    public synchronized void write(JsonNode message) {
+            if (!acceptingMessages.get()) {
+                throw new IllegalStateException("Trade file writer is already closed");
+            }
+            try {
+                if (queue.offer(message, 100, TimeUnit.MILLISECONDS)) {
+                    return;
+                }
+
+                // Ggf. hier einen Log einbauen: log.warn("Queue is full, backpressure building up!");
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted while enqueueing trade message", exception);
+            }
+        }
+    }
+
+    private void runWriter() {
+        List<JsonNode> batch  = new ArrayList<>(BATCH_SIZE);
+        long lastFlushTime = System.nanoTime();
+
         try {
-            writer.write(message.toString());
-            writer.newLine();
-            writer.flush();
+            while (acceptingMessages.get() || !queue.isEmpty()) {
+
+                JsonNode firstMessage = queue.poll(100, TimeUnit.MILLISECONDS);
+                if (firstMessage != null) {
+                    batch.add(firstMessage);
+                    queue.drainTo(batch, BATCH_SIZE -1);
+
+                    for (JsonNode message : batch) {
+                        writer.write(message.toString());
+                        writer.newLine();
+                    }
+                    batch.clear();
+                }
+
+                long now = System.nanoTime();
+                long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(now - lastFlushTime);
+
+                // Flush nur ausführen, wenn auch etwas Zeit vergangen ist ODER die Schleife gleich endet
+                // || !acceptingMessages.get() && queue.isEmpty()
+                if (elapsedMillis >= FLUSH_INTERVAL_MILLLIS) {
+                    writer.flush();
+                    lastFlushTime = now;
+                }
+
+                writer.flush();
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            writerFailure.compareAndSet(null, new IllegalStateException("Writer thread interrupted", exception));
         } catch (IOException exception) {
-            throw new UncheckedIOException("Failed to write trade message to" + this.file, exception);
+            writerFailure.compareAndSet(null, new UncheckedIOException("Failed to write to:" + file, exception));
+        } finally {
+            acceptingMessages.set(false);
+            try {
+                writer.close();
+            } catch (IOException exception) {
+                writerFailure.compareAndSet(null, new UncheckedIOException("Failed to close file: " + file , exception));
+            }
+        }
+    }
+
+    private void throwIfWriterFailed() {
+        RuntimeException failure = writerFailure.get();
+
+        if (failure != null) {
+            throw new IllegalStateException("Trade file writer has failed",failure);
         }
     }
 
     @Override
     public synchronized void close() {
+        acceptingMessages.set(false);
+        writerExecutor.shutdown();
         try {
-            writer.close();
-        } catch (IOException exception) {
-            throw new UncheckedIOException("Failed to close trade file" + this.file, exception);
+            if (!writerExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
+                writerExecutor.shutdownNow();
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(exception);
         }
+
+        throwIfWriterFailed();
     }
 }
 

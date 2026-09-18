@@ -293,19 +293,22 @@ public class BitgetTradeReceiver {
     }
 
     private void handleTradeSnapshot(JsonNode message) {
-        writeTradeMessage(message);
+        enqueueTradeMessage(message);
     }
 
     private void handleTradeUpdate(JsonNode message) {
-        writeTradeMessage(message);
+        enqueueTradeMessage(message);
     }
 
-
-    private void writeTradeMessage(JsonNode message){
+    private void enqueueTradeMessage(JsonNode message) {
         try {
-            tradeFileWriter.write(message);
-        }catch (UncheckedIOException exception){
-            LOGGER.error("Failed to write trade message", exception);
+            tradeFileWriter.enqueue(message);
+        } catch (RuntimeException exception) {
+            LOGGER.error("Trade persistence failed; stopping WebSocket connection", exception);
+
+            shuttingDown.set(true);
+            stopHeartbeat();
+            websocket.abort();
         }
     }
 
