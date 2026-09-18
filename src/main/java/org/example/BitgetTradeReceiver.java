@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
 
+import java.io.UncheckedIOException;
 import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -36,12 +37,14 @@ public class BitgetTradeReceiver {
     private final WebSocketConnection websocket;
     private final BitgetTradeProtocol protocol;
     private final MessageDecoder messageDecoder;
+    private final TradeFileWriter tradeFileWriter;
 
 
-    public BitgetTradeReceiver(WebSocketConnection connection, BitgetTradeProtocol protocol, MessageDecoder messageDecoder) {
+    public BitgetTradeReceiver(WebSocketConnection connection, BitgetTradeProtocol protocol, MessageDecoder messageDecoder, TradeFileWriter tradeFileWriter) {
         this.websocket = connection;
         this.protocol = protocol;
         this.messageDecoder = messageDecoder;
+        this.tradeFileWriter = tradeFileWriter;
     }
 
     public CompletionStage<Void> connect() {
@@ -289,12 +292,21 @@ public class BitgetTradeReceiver {
         );
     }
 
-    private void handleTradeSnapshot(JsonNode message){
-        // Wird später an die Trade-Verarbeitung weitergegeben.
+    private void handleTradeSnapshot(JsonNode message) {
+        writeTradeMessage(message);
     }
 
-    private void handleTradeUpdate(JsonNode message){
-        // Wird später an die Trade-Verarbeitung weitergegeben.
+    private void handleTradeUpdate(JsonNode message) {
+        writeTradeMessage(message);
+    }
+
+
+    private void writeTradeMessage(JsonNode message){
+        try {
+            tradeFileWriter.write(message);
+        }catch (UncheckedIOException exception){
+            LOGGER.error("Failed to write trade message", exception);
+        }
     }
 
     private void handleUnknownMessage(JsonNode message){

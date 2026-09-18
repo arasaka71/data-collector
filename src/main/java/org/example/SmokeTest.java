@@ -4,6 +4,7 @@ import tools.jackson.databind.ObjectReader;
 import tools.jackson.databind.ObjectWriter;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 
 public final class SmokeTest {
@@ -18,11 +19,14 @@ public final class SmokeTest {
 
         var jsonMapper = JsonMapper.builder().build();
 
-        var decoder = new MessageDecoder(jsonMapper);
         var protocol = new BitgetTradeProtocol(jsonMapper);
+        var decoder = new MessageDecoder(jsonMapper);
+        var tradeFileWriter = new TradeFileWriter(Path.of("data", "bitget-trades.jsonl"));
+
         var webSocketConnection = new WebSocketConnection();
 
-        var receiver = new BitgetTradeReceiver(webSocketConnection, protocol, decoder);
+
+        var receiver = new BitgetTradeReceiver(webSocketConnection, protocol, decoder,  tradeFileWriter);
 
         try{
             receiver.connect().toCompletableFuture().join();
@@ -35,7 +39,8 @@ public final class SmokeTest {
             Thread.sleep(30_000);
 
         } finally {
-            receiver.disconnect().join();
+            //receiver.disconnect().join();
+            tradeFileWriter.close();
         }
 
     }
