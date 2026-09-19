@@ -14,9 +14,11 @@ import java.util.function.Consumer;
 public final class WebSocketConnection implements WebSocket.Listener {
 
     private final HttpClient httpClient;
-    private final Consumer<String> messageHandler;
-    private final Consumer<Throwable> errorHandler;
-    private final BiConsumer<Integer, String> closeHandler;
+
+    // Beim Consumer wird der Receiver unmittelbar im WebSocket-Thread aufgerufen.
+    private volatile Consumer<String> messageHandler;
+    private volatile Consumer<Throwable> errorHandler;
+    private volatile BiConsumer<Integer, String> closeHandler;
 
     private final StringBuilder textBuffer = new StringBuilder();
     private final AtomicBoolean connecting = new AtomicBoolean(false);
@@ -26,23 +28,21 @@ public final class WebSocketConnection implements WebSocket.Listener {
 
     private volatile WebSocket webSocket;
 
-    public WebSocketConnection(Consumer<String> messageHandler,  Consumer<Throwable> errorHandler,  BiConsumer<Integer, String> closeHandler) {
+    public WebSocketConnection() {
         this.httpClient = HttpClient.newHttpClient();
-        this.messageHandler = messageHandler; // Objects.requireNonNull()
-        this.errorHandler = errorHandler;
-        this.closeHandler = closeHandler;
     }
 
-
-    public CompletionStage<Void> connect(URI endpoint) {
-        Objects.requireNonNull(endpoint, "Endpoint must not be null");
-
+    public CompletionStage<Void> connect(URI endpoint, Consumer<String> messageHandler,  Consumer<Throwable> errorHandler, BiConsumer<Integer, String> closeHandler) {
         if (isConnected()) {
             return CompletableFuture.failedFuture(new IllegalStateException("Already connected"));
         }
         if (!connecting.compareAndSet(false, true)) {
-            return CompletableFuture.failedFuture(new IllegalStateException("Already connected"));
+            return CompletableFuture.failedFuture(new IllegalStateException("Already connecting"));
         }
+
+        this.messageHandler = messageHandler;
+        this.closeHandler = closeHandler;
+        this.errorHandler = errorHandler;
 
         return httpClient.newWebSocketBuilder()
                 //.connectTimeout(CONNECT_TIMEOUT) ev
@@ -52,7 +52,6 @@ public final class WebSocketConnection implements WebSocket.Listener {
     }
 
     public CompletableFuture<Void> sendText(String message) {
-        Objects.requireNonNull(message);
         WebSocket socket = requireConnectedWebSocket();
 
         // chains the new send operation to sendTail
@@ -71,6 +70,14 @@ public final class WebSocketConnection implements WebSocket.Listener {
         }
     }
 
+    public void abort() {
+        WebSocket socket = this.webSocket;
+
+        if (socket == null) { return;}
+
+        clearConnection(socket);
+        socket.abort();
+    }
 
     public CompletableFuture<Void> disconnect() {
         WebSocket socket = this.webSocket;
@@ -119,19 +126,12 @@ public final class WebSocketConnection implements WebSocket.Listener {
             if (last) {
                 String msg = textBuffer.toString();
                 textBuffer.setLength(0);
-                messageHandler.accept(data.toString());
+                messageHandler.accept(msg);
             }
             return null;
         } finally {
             webSocket.request(1);
         }
-    }
-
-    // hier eigendlich schdeuler für reconnect
-    @Override
-    public void onError(WebSocket webSocket, Throwable error) {
-        clearConnection(webSocket);
-        errorHandler.accept(error);
     }
 
     @Override
@@ -140,6 +140,13 @@ public final class WebSocketConnection implements WebSocket.Listener {
         closeHandler.accept(statusCode, reason);
 
         return null;
+    }
+
+    // hier eigendlich schdeuler für reconnect
+    @Override
+    public void onError(WebSocket webSocket, Throwable error) {
+        clearConnection(webSocket);
+        errorHandler.accept(error);
     }
 
     private WebSocket requireConnectedWebSocket() {
