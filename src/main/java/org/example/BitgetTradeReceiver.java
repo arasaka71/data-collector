@@ -4,7 +4,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
 
-import java.io.UncheckedIOException;
 import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -60,6 +59,10 @@ public class BitgetTradeReceiver {
                 this::handleConnectionClosed
         ).whenComplete((unused, error) -> {
             if (error == null) {
+                if (shuttingDown.get()) {
+                    websocket.disconnect();
+                    return;
+                }
                 reconnectAttempt.set(0);
                 reconnectScheduler.set(false);
                 LOGGER.info("WebSocket connection established");
@@ -80,10 +83,18 @@ public class BitgetTradeReceiver {
 
         desiredSubscriptions.add(normalizedSymbol);
 
+        if (!websocket.isConnected()) {
+            LOGGER.info("Subscription registered and will be sent after connecting: symbol={}",  normalizedSymbol);
+
+            return CompletableFuture.completedFuture(null);
+        }
+
         return websocket.sendText(msg);
     }
 
+
     public CompletableFuture<Void> unsubscribe(String symbol) {
+        // never use this XD
         String normalizedSymbol = protocol.normalizeSymbol(symbol);
         String msg = protocol.unsubscriptionMessage(normalizedSymbol);
 
@@ -238,6 +249,8 @@ public class BitgetTradeReceiver {
     }
 
     private void handleMessage(String rawMessage){
+        if (shuttingDown.get()) {return;}
+
         ClassifiedMessage msg;
 
         try {

@@ -21,9 +21,7 @@ public class TradeFileWriter implements AutoCloseable {
     private static final int QUEUE_CAPACITY = 50_000;
     private static final int BATCH_SIZE = 500;
     private static final int WRITER_BUFFER_SIZE = 64 * 1024;
-    private static final long FLUSH_INTERVAL_MILLLIS = 1_000;
-
-
+    private static final long FLUSH_INTERVAL_MILLIS = 1_000;
 
     private final BlockingQueue<JsonNode> queue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
 
@@ -115,13 +113,13 @@ public class TradeFileWriter implements AutoCloseable {
 
                 // Flush nur ausführen, wenn auch etwas Zeit vergangen ist ODER die Schleife gleich endet
                 // || !acceptingMessages.get() && queue.isEmpty()
-                if (elapsedMillis >= FLUSH_INTERVAL_MILLLIS) {
+                if (elapsedMillis >= FLUSH_INTERVAL_MILLIS) {
                     writer.flush();
                     lastFlushTime = now;
                 }
-
-                writer.flush();
             }
+            // queue ist vollständig abgearbeitet
+            writer.flush();
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             writerFailure.compareAndSet(null, new IllegalStateException("Writer thread interrupted", exception));
@@ -146,16 +144,16 @@ public class TradeFileWriter implements AutoCloseable {
     }
 
     @Override
-    public synchronized void close() {
+    public void close() {
         acceptingMessages.set(false);
         writerExecutor.shutdown();
         try {
-            if (!writerExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
-                writerExecutor.shutdownNow();
+            while (!writerExecutor.awaitTermination(1, TimeUnit.SECONDS)) {
+                // Writer verarbeitet weiter die restliche Queue
             }
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException(exception);
+            throw new RuntimeException("Interrupted while closing TradeFileWriter", exception);
         }
 
         throwIfWriterFailed();
