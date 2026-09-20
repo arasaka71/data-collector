@@ -198,7 +198,9 @@ public class BitgetTradeReceiver {
         try {
             websocket.sendText(protocol.heartbeatMessage())
                     .whenComplete((unused, error) -> {
-                        if (error != null) {
+                        if (error == null) {
+                            LOGGER.debug("Heartbeat ping sent");
+                        }else {
                             handleHeartbeatFailure("Failed to send heartbeat", error);
                         }
                     });

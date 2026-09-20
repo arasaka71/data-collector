@@ -1,5 +1,7 @@
 package org.example;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
 
 import java.io.BufferedWriter;
@@ -17,6 +19,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class TradeFileWriter implements AutoCloseable {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(TradeFileWriter.class);
+
+    private static final int QUEUE_WARNING_PERCENT = 80;
 
     private static final int QUEUE_CAPACITY = 50_000;
     private static final int BATCH_SIZE = 500;
@@ -92,6 +98,17 @@ public class TradeFileWriter implements AutoCloseable {
     private void runWriter() {
         List<JsonNode> batch  = new ArrayList<>(BATCH_SIZE);
         long lastFlushTime = System.nanoTime();
+        long messagesSinceLastFlush = 0;
+        long totalWrittenMessages = 0;
+
+        LOGGER.info(
+                "Trade file writer started: file={}, queueCapacity={}, batchSize={}, bufferSize={} bytes, flushInterval={} ms",
+                file,
+                QUEUE_CAPACITY,
+                BATCH_SIZE,
+                WRITER_BUFFER_SIZE,
+                FLUSH_INTERVAL_MILLIS
+        );
 
         try {
             while (acceptingMessages.get() || !queue.isEmpty()) {
@@ -101,11 +118,16 @@ public class TradeFileWriter implements AutoCloseable {
                     batch.add(firstMessage);
                     queue.drainTo(batch, BATCH_SIZE -1);
 
+                    int currentBatchSize = batch.size();
+
                     for (JsonNode message : batch) {
                         writer.write(message.toString());
                         writer.newLine();
                     }
                     batch.clear();
+
+                    messagesSinceLastFlush += currentBatchSize;
+                    totalWrittenMessages += currentBatchSize;
                 }
 
                 long now = System.nanoTime();
@@ -115,22 +137,34 @@ public class TradeFileWriter implements AutoCloseable {
                 // || !acceptingMessages.get() && queue.isEmpty()
                 if (elapsedMillis >= FLUSH_INTERVAL_MILLIS) {
                     writer.flush();
+
+                    logFlushStatus(messagesSinceLastFlush, totalWrittenMessages);
+
+                    messagesSinceLastFlush = 0;
                     lastFlushTime = now;
                 }
             }
             // queue ist vollständig abgearbeitet
             writer.flush();
+
+            LOGGER.info("Trade file writer drained and flushed: totalWritten={}, queueSize={}",
+                    totalWrittenMessages,
+                    queue.size()
+            );
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             writerFailure.compareAndSet(null, new IllegalStateException("Writer thread interrupted", exception));
+            LOGGER.error("Trade file writer interrupted: file={}", file, exception);
         } catch (IOException exception) {
             writerFailure.compareAndSet(null, new UncheckedIOException("Failed to write to:" + file, exception));
+            LOGGER.error("Trade file writer failed: file={}", file, exception);
         } finally {
             acceptingMessages.set(false);
             try {
                 writer.close();
             } catch (IOException exception) {
                 writerFailure.compareAndSet(null, new UncheckedIOException("Failed to close file: " + file , exception));
+                LOGGER.error("Failed to close trade file: file={}", file, exception);
             }
         }
     }
@@ -140,6 +174,38 @@ public class TradeFileWriter implements AutoCloseable {
 
         if (failure != null) {
             throw new IllegalStateException("Trade file writer has failed",failure);
+        }
+    }
+
+    private void logFlushStatus(
+            long flushedMessages,
+            long totalWrittenMessages
+    ) {
+        int queueSize = queue.size();
+        int remainingCapacity = QUEUE_CAPACITY - queueSize;
+        int queueUsagePercent =
+                (int) ((queueSize * 100L) / QUEUE_CAPACITY);
+
+        if (queueUsagePercent >= QUEUE_WARNING_PERCENT) {
+            LOGGER.warn(
+                    "Trade queue backlog is high: flushed={}, totalWritten={}, queueSize={}/{}, queueUsage={}%, remainingCapacity={}",
+                    flushedMessages,
+                    totalWrittenMessages,
+                    queueSize,
+                    QUEUE_CAPACITY,
+                    queueUsagePercent,
+                    remainingCapacity
+            );
+        } else {
+            LOGGER.debug(
+                    "Trade data flushed: flushed={}, totalWritten={}, queueSize={}/{}, queueUsage={}%, remainingCapacity={}",
+                    flushedMessages,
+                    totalWrittenMessages,
+                    queueSize,
+                    QUEUE_CAPACITY,
+                    queueUsagePercent,
+                    remainingCapacity
+            );
         }
     }
 
